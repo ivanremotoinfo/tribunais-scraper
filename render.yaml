@@ -2,7 +2,7 @@ services:
   - type: web
     name: tribunais-scraper
     env: node
-    region: oregon          # us-west — mais próximo do Brasil disponível no free tier
+    region: oregon
     plan: free
     buildCommand: npm install
     startCommand: npm start
@@ -11,11 +11,12 @@ services:
       - key: NODE_ENV
         value: production
       - key: USE_PUPPETEER
-        value: "false"        # mantenha false no free tier (512MB RAM)
+        value: "true"
       - key: CACHE_TTL
         value: "3600"
       - key: REQUEST_TIMEOUT
         value: "15000"
       - key: CORS_ORIGINS
-        # Substitua pelo seu domínio GitHub Pages
         value: "https://SEU_USUARIO.github.io,https://suporte.adv.br"
+      - key: ANTHROPIC_API_KEY
+        sync: false        # definir manualmente no dashboard do Render

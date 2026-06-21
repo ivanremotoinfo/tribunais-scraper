@@ -48,4 +48,4 @@ async function fetchComPuppeteer(url, { seletor, timeout = 12000 } = {}) {
   }
 }
 
-module.exports = { isEnabled, fetchComPuppeteer };
+module.exports = { isEnabled, getBrowser, fetchComPuppeteer };
