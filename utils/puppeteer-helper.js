@@ -8,6 +8,7 @@ function isEnabled() {
 
 function getExecutablePath() {
   const caminhos = [
+    '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium-browser',
