@@ -1,41 +1,49 @@
 // Puppeteer é opcional — só carregado quando USE_PUPPETEER=true
-let puppeteer = null;
+let puppeteerCore = null;
 let browser = null;
 
 function isEnabled() {
   return process.env.USE_PUPPETEER === 'true';
 }
 
-function getExecutablePath() {
+async function getExecutablePath() {
+  // Tenta usar o chromium instalado via npm (pacote 'chromium')
+  try {
+    const chromium = require('chromium');
+    const path = chromium.path;
+    console.log('[puppeteer] Chromium via npm encontrado em:', path);
+    return path;
+  } catch (_) {}
+
+  // Fallback: caminhos do sistema
+  const fs = require('fs');
   const caminhos = [
-    '/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/google-chrome',
     '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
-    '/opt/render/project/.render/chrome/opt/google/chrome/chrome'
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome'
   ];
-  const fs = require('fs');
   for (const c of caminhos) {
     if (fs.existsSync(c)) {
-      console.log('[puppeteer] Chrome encontrado em:', c);
+      console.log('[puppeteer] Chromium do sistema encontrado em:', c);
       return c;
     }
   }
-  console.warn('[puppeteer] Chrome não encontrado nos caminhos padrão — usando padrão do puppeteer');
-  return undefined;
+
+  throw new Error('Chromium não encontrado. Instale o pacote npm "chromium" ou defina PUPPETEER_EXECUTABLE_PATH.');
 }
 
 async function getBrowser() {
   if (!isEnabled()) throw new Error('Puppeteer desabilitado. Defina USE_PUPPETEER=true para ativar.');
-  if (!puppeteer) {
-    puppeteer = require('puppeteer');
+  if (!puppeteerCore) {
+    puppeteerCore = require('puppeteer-core');
   }
   if (!browser || !browser.isConnected()) {
     console.log('[puppeteer] Iniciando browser...');
-    const executablePath = getExecutablePath();
-    const opts = {
+    const executablePath = await getExecutablePath();
+    browser = await puppeteerCore.launch({
       headless: 'new',
+      executablePath,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -46,9 +54,7 @@ async function getBrowser() {
         '--single-process',
         '--disable-gpu'
       ]
-    };
-    if (executablePath) opts.executablePath = executablePath;
-    browser = await puppeteer.launch(opts);
+    });
     browser.on('disconnected', () => { browser = null; });
   }
   return browser;
