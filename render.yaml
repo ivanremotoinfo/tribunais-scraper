@@ -4,7 +4,7 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: npm install
+    buildCommand: apt-get install -y chromium && npm install
     startCommand: npm start
     healthCheckPath: /health
     envVars:
@@ -19,4 +19,8 @@ services:
       - key: CORS_ORIGINS
         value: "https://SEU_USUARIO.github.io,https://suporte.adv.br"
       - key: ANTHROPIC_API_KEY
-        sync: false        # definir manualmente no dashboard do Render
+        sync: false
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: "/usr/bin/chromium"
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
