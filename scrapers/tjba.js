@@ -9,8 +9,8 @@ const { criarCliente, formatarData, limparTexto, apenasDigitos } = require('../u
 const { isEnabled, fetchComPuppeteer } = require('../utils/puppeteer-helper');
 
 const PORTAIS = [
-  'https://eproc.tjba.jus.br',
-  'https://eproc2.tjba.jus.br'
+  'https://eproc1g.tjba.jus.br',
+  'https://eproc2g.tjba.jus.br'
 ];
 
 function urlConsulta(base, numero) {

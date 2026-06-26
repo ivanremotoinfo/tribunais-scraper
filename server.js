@@ -4,6 +4,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const NodeCache = require('node-cache');
 const { consultar } = require('./scrapers');
+const tjbaBusca = require('./scrapers/tjba-busca');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -35,6 +36,8 @@ app.use(cors({
     }
     // GitHub Pages: permite qualquer *.github.io
     if (origin.endsWith('.github.io')) return cb(null, true);
+    // suporte.adv.br e subdomínios
+    if (origin.endsWith('.suporte.adv.br') || origin === 'https://suporteadv.suporte.adv.br') return cb(null, true);
     cb(new Error(`CORS bloqueado para: ${origin}`));
   },
   methods: ['GET', 'POST', 'OPTIONS'],
@@ -131,6 +134,62 @@ app.post('/andamentos', async (req, res) => {
       erro: err.message || 'Erro interno no scraper',
       andamentos: []
     });
+  }
+});
+
+// ── GET /buscar-por-oab — orientação rápida no browser ───────────────────────
+app.get('/buscar-por-oab', (_req, res) => {
+  res.json({
+    sucesso: false,
+    info: 'Use POST com body JSON',
+    exemplo: { oab: '58870', nome: 'JOSE NILSON SILVA', tribunal: 'tjba' }
+  });
+});
+
+// ── POST /buscar-por-oab — busca processos por OAB/nome do advogado ───────────
+app.post('/buscar-por-oab', async (req, res) => {
+  const { oab, nome, tribunal } = req.body || {};
+
+  if (!oab && !nome) {
+    return res.status(400).json({ sucesso: false, erro: 'Informe "oab" ou "nome".' });
+  }
+
+  const trib = String(tribunal || 'tjba').toLowerCase().trim();
+
+  if (trib !== 'tjba') {
+    return res.status(400).json({ sucesso: false, erro: `Tribunal "${trib}" ainda não suportado para busca por OAB. Use "tjba".` });
+  }
+
+  const cacheKey = `oab:${trib}:${oab || ''}:${nome || ''}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    console.log(`[cache hit] ${cacheKey}`);
+    return res.json({ ...cached, cache: true });
+  }
+
+  console.log(`[buscar-por-oab] tribunal=${trib} oab=${oab || '-'} nome=${nome || '-'}`);
+  const inicio = Date.now();
+
+  try {
+    const resultado = await Promise.race([
+      tjbaBusca.buscar({ oab, nome }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout de 30s atingido')), 30000)
+      )
+    ]);
+
+    const duracao = Date.now() - inicio;
+    console.log(`[ok] buscar-por-oab ${trib} — ${resultado.total} processos em ${duracao}ms`);
+
+    if (resultado.sucesso && resultado.total > 0) {
+      cache.set(cacheKey, resultado);
+    }
+
+    return res.json(resultado);
+  } catch (err) {
+    const duracao = Date.now() - inicio;
+    console.error(`[erro] buscar-por-oab (${duracao}ms):`, err.message);
+    return res.json({ sucesso: false, erro: err.message || 'Erro interno', processos: [] });
   }
 });
 
