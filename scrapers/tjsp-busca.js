@@ -1,26 +1,25 @@
 // TJSP — eSAJ — Busca por OAB
-// Portal público: https://esaj.tjsp.jus.br/cpopg/open.do
-// Requer fluxo: GET open.do (cookies) → POST search.do (resultados)
+// Portal: https://esaj.tjsp.jus.br/cpopg/open.do
+// NOTA: O eSAJ TJSP bloqueia POSTs via Axios (proteção Tomcat anti-CSRF).
+//       Requer Puppeteer (USE_PUPPETEER=true) para funcionar corretamente.
 
-const axios = require('axios');
 const cheerio = require('cheerio');
-const { formatarData, limparTexto, UA } = require('../utils/http');
+const { criarCliente, formatarData, limparTexto } = require('../utils/http');
+const { isEnabled, fetchComPuppeteer } = require('../utils/puppeteer-helper');
 
 const BASE = 'https://esaj.tjsp.jus.br';
-const TIMEOUT = 20000;
+const TIMEOUT = 25000;
 
 function criarClienteComCookies(cookies = '') {
-  return axios.create({
-    baseURL: BASE,
+  return criarCliente(BASE, {
     timeout: TIMEOUT,
     headers: {
-      'User-Agent': UA,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,*/*;q=0.9',
       'Accept-Language': 'pt-BR,pt;q=0.9',
       'Cookie': cookies
     },
     maxRedirects: 5,
-    validateStatus: s => s < 400
+    validateStatus: s => s < 500
   });
 }
 
@@ -33,13 +32,10 @@ function parsearResultados(html) {
   const $ = cheerio.load(html);
   const processos = [];
 
-  // eSAJ retorna tabela com class="fundoClaro" ou "fundoEscuro"
-  // Estrutura: Processo | Classe | Assunto | Magistrado | Vara | Data
   $('table tr.fundoClaro, table tr.fundoEscuro').each((_i, tr) => {
     const tds = $(tr).find('td');
     if (tds.length < 2) return;
 
-    // 1ª coluna: link com número do processo
     const linkEl = $(tds[0]).find('a');
     const numero = limparTexto(linkEl.length ? linkEl.text() : $(tds[0]).text());
     if (!numero || !numero.match(/\d{7}/)) return;
@@ -68,10 +64,9 @@ function parsearResultados(html) {
   return processos;
 }
 
-async function buscarPorOAB(oab) {
+async function buscarComAxios(oab) {
   const http0 = criarClienteComCookies('');
 
-  // 1. Obter cookies de sessão
   console.log('[tjsp-busca] GET open.do (sessão)');
   const r0 = await http0.get('/cpopg/open.do');
   const cookies = extrairCookies(r0);
@@ -79,51 +74,80 @@ async function buscarPorOAB(oab) {
 
   const http = criarClienteComCookies(cookies);
 
-  // 2. Buscar por OAB (1ª grau)
+  // Parâmetros corretos para busca por OAB no eSAJ TJSP
   const params = new URLSearchParams({
     conversationId: '',
-    cbPesquisa: 'NMOADVOGADO',
-    'dadosConsulta.valorConsultaNuOAB': oab,
+    cbPesquisa: 'NUMOAB',
+    'dadosConsulta.valorConsulta': oab,
     'dadosConsulta.localPesquisa.cdLocal': '-1',
-    'dadosConsulta.tipoNuProcesso': 'SAJ6',
-    gateway: 'true'
+    'dadosConsulta.tipoNuProcesso': 'SAJ',
+    cdForo: '-1'
   });
 
   console.log(`[tjsp-busca] POST search.do OAB=${oab}`);
   const r1 = await http.post('/cpopg/search.do', params.toString(), {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': `${BASE}/cpopg/open.do` }
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Referer': `${BASE}/cpopg/open.do`
+    }
   });
 
-  const processos1G = parsearResultados(r1.data);
-  console.log(`[tjsp-busca] 1G → ${processos1G.length} processos`);
-
-  // 3. Buscar 2º grau também
-  let processos2G = [];
-  try {
-    const r0b = await http0.get('/cposg/open.do');
-    const cookies2 = extrairCookies(r0b) || cookies;
-    const http2 = criarClienteComCookies(cookies2);
-    const r2 = await http2.post('/cposg/search.do', params.toString(), {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Referer': `${BASE}/cposg/open.do` }
-    });
-    processos2G = parsearResultados(r2.data);
-    console.log(`[tjsp-busca] 2G → ${processos2G.length} processos`);
-  } catch (err) {
-    console.warn('[tjsp-busca] 2G falhou:', err.message);
+  if (r1.status === 403) {
+    throw new Error('TJSP eSAJ bloqueou a requisição (403). Ative USE_PUPPETEER=true para busca por OAB no TJSP.');
   }
 
-  return [...processos1G, ...processos2G];
+  return parsearResultados(r1.data);
+}
+
+async function buscarComPuppeteer(oab) {
+  const urlAbrir = `${BASE}/cpopg/open.do`;
+  const urlBusca = `${BASE}/cpopg/search.do`;
+
+  // Puppeteer preenche e submete o formulário como navegador real
+  const html = await fetchComPuppeteer(urlAbrir, {
+    timeout: 20000,
+    preAcao: async (page) => {
+      await page.select('#cbPesquisa', 'NUMOAB');
+      await page.waitForSelector('[name="dadosConsulta.valorConsulta"]', { timeout: 3000 });
+      await page.type('[name="dadosConsulta.valorConsulta"]', String(oab));
+      await Promise.all([
+        page.waitForNavigation({ timeout: 15000 }),
+        page.click('input[type="submit"], button[type="submit"]')
+      ]);
+    }
+  });
+
+  return parsearResultados(html);
 }
 
 async function buscar({ oab }) {
   if (!oab) throw new Error('OAB é obrigatório para busca no TJSP');
-  const processos = await buscarPorOAB(oab);
-  return {
-    sucesso: true,
-    tribunal: 'TJSP',
-    total: processos.length,
-    processos
-  };
+
+  // Tentar Puppeteer primeiro se disponível (necessário para o TJSP)
+  if (isEnabled()) {
+    try {
+      const processos = await buscarComPuppeteer(oab);
+      return { sucesso: true, tribunal: 'TJSP', total: processos.length, processos };
+    } catch (err) {
+      console.warn('[tjsp-busca:puppeteer] Falhou:', err.message);
+    }
+  }
+
+  // Fallback Axios (pode retornar 403 no TJSP)
+  try {
+    const processos = await buscarComAxios(oab);
+    return { sucesso: true, tribunal: 'TJSP', total: processos.length, processos };
+  } catch (err) {
+    if (err.message.includes('403')) {
+      return {
+        sucesso: false,
+        erro: 'Busca por OAB no TJSP requer Puppeteer (ative USE_PUPPETEER=true no servidor).',
+        processos: [],
+        total: 0
+      };
+    }
+    throw err;
+  }
 }
 
 module.exports = { buscar };

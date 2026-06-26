@@ -1,35 +1,44 @@
 // TJMG — Tribunal de Justiça de Minas Gerais
-// Portal PJe: https://pje.tjmg.jus.br
-// Portal eSAJ 2G: https://www4.tjmg.jus.br/juridico/sf/proc_resultado2.jsp
-// Estratégia: tenta eSAJ primeiro (mais simples), depois PJe
-// O TJMG tem dois sistemas coexistindo: eSAJ (legado) e PJe (novo)
+// Portal eProc: https://eproc-consulta-publica-1g.tjmg.jus.br
+// Estratégia: Axios + Cheerio (eProc é SSR — HTML completo na primeira requisição)
 
 const cheerio = require('cheerio');
-const { criarCliente, formatarData, limparTexto, parsearNumeroCNJ, apenasDigitos } = require('../utils/http');
+const { criarCliente, formatarData, limparTexto, apenasDigitos } = require('../utils/http');
 const { isEnabled, fetchComPuppeteer } = require('../utils/puppeteer-helper');
 
-const BASE_ESAJ = 'https://www4.tjmg.jus.br';
-const BASE_PJE  = 'https://pje.tjmg.jus.br';
+const PORTAIS = [
+  'https://eproc-consulta-publica-1g.tjmg.jus.br',
+  'https://eproc1g.tjmg.jus.br',
+  'https://eproc2g.tjmg.jus.br'
+];
 
-function urlESAJ(numero) {
-  const { cnj } = parsearNumeroCNJ(numero);
-  return `${BASE_ESAJ}/juridico/sf/proc_resultado2.jsp?listaProcessos=${encodeURIComponent(cnj)}`;
+function urlConsulta(base, numero) {
+  return `${base}/eproc/externo_controlador.php?acao=processo_seleciona_publica&chave=&num_processo=${apenasDigitos(numero)}`;
 }
 
 function parsearHtml(html) {
   const $ = cheerio.load(html);
   const andamentos = [];
 
-  // TJMG eSAJ — similar ao TJSP
-  $('#tableMovimentacoes tr, .movimentacoes tr').each((_i, tr) => {
-    const tds = $(tr).find('td');
-    if (tds.length < 2) return;
-    const col0 = limparTexto($(tds[0]).text());
-    if (!col0.match(/^\d{2}\/\d{2}\/\d{4}/)) return;
-    andamentos.push({ data: formatarData(col0), descricao: limparTexto($(tds[1]).text()) });
-  });
+  const tentarTabela = (linhas) => {
+    linhas.each((_i, tr) => {
+      const tds = $(tr).find('td');
+      if (tds.length < 2) return;
+      const col0 = limparTexto($(tds[0]).text());
+      const col1 = limparTexto($(tds[1]).text());
+      if (!col0.match(/^\d{2}\/\d{2}\/\d{4}/)) return;
+      andamentos.push({ data: formatarData(col0), descricao: col1 });
+    });
+  };
 
-  // Fallback genérico
+  let linhas = $('table#tblMovimentos tr, table#fldMovimentos tr');
+  if (linhas.length) { tentarTabela(linhas); }
+
+  if (!andamentos.length) {
+    linhas = $('tr.infraTrClara, tr.infraTrEscura');
+    tentarTabela(linhas);
+  }
+
   if (!andamentos.length) {
     $('table tr').each((_i, tr) => {
       const tds = $(tr).find('td');
@@ -43,67 +52,78 @@ function parsearHtml(html) {
   return andamentos;
 }
 
-async function tentarESAJ(numero) {
-  const url = urlESAJ(numero);
-  const http = criarCliente(BASE_ESAJ);
-  console.log(`[tjmg:esaj] GET ${url}`);
+function detectarErro(html) {
+  const lower = html.toLowerCase();
+  return (
+    lower.includes('processo não encontrado') ||
+    lower.includes('nenhum processo encontrado') ||
+    lower.includes('processo_nao_encontrado') ||
+    lower.includes('acesso negado') ||
+    lower.includes('captcha')
+  );
+}
 
-  const { data: html } = await http.get(url);
+async function tentarComAxios(numero) {
+  for (const base of PORTAIS) {
+    try {
+      const http = criarCliente(base);
+      const url = urlConsulta(base, numero);
+      console.log(`[tjmg] GET ${url}`);
+      const { data: html } = await http.get(url);
 
-  if (html.toLowerCase().includes('nenhum processo encontrado') ||
-      html.toLowerCase().includes('processo não localizado')) {
-    return null;
+      if (detectarErro(html)) {
+        console.log(`[tjmg] Processo não encontrado em ${base}`);
+        continue;
+      }
+
+      const andamentos = parsearHtml(html);
+      if (andamentos.length > 0) {
+        return { sucesso: true, andamentos, tribunal: 'TJMG', portal: base };
+      }
+
+      console.log(`[tjmg] HTML recebido de ${base} mas sem movimentos (${html.length} chars)`);
+    } catch (err) {
+      console.warn(`[tjmg] Axios falhou em ${base}:`, err.message);
+    }
   }
-
-  const andamentos = parsearHtml(html);
-  if (andamentos.length > 0) {
-    return { sucesso: true, andamentos, tribunal: 'TJMG', portal: 'eSAJ' };
-  }
-
   return null;
 }
 
-async function tentarPJePuppeteer(numero) {
-  if (!isEnabled()) return null;
+async function tentarComPuppeteer(numero) {
+  for (const base of PORTAIS) {
+    try {
+      const url = urlConsulta(base, numero);
+      console.log(`[tjmg:puppeteer] GET ${url}`);
+      const html = await fetchComPuppeteer(url, { seletor: '#tblMovimentos, .infraTrClara', timeout: 15000 });
 
-  const { cnj } = parsearNumeroCNJ(numero);
-  const url = `${BASE_PJE}/pje/ConsultaPublica/listView.seam`;
+      if (detectarErro(html)) continue;
 
-  try {
-    const puppeteer = require('puppeteer');
-    const { getBrowser } = require('../utils/puppeteer-helper');
-    // O PJe requer interação de formulário — use fetchComPuppeteer com URL de resultado
-    // Alguns ambientes PJe expõem endpoint direto
-    const urlDireta = `${BASE_PJE}/pje/Processo/ConsultaProcesso/Detalhe/listView.seam?numero=${encodeURIComponent(cnj)}`;
-    const html = await fetchComPuppeteer(urlDireta, { seletor: 'table', timeout: 15000 });
-    const andamentos = parsearHtml(html);
-    if (andamentos.length > 0) {
-      return { sucesso: true, andamentos, tribunal: 'TJMG', portal: 'PJe (puppeteer)' };
+      const andamentos = parsearHtml(html);
+      if (andamentos.length > 0) {
+        return { sucesso: true, andamentos, tribunal: 'TJMG', portal: base + ' (puppeteer)' };
+      }
+    } catch (err) {
+      console.warn(`[tjmg:puppeteer] Falhou em ${base}:`, err.message);
     }
-  } catch (err) {
-    console.warn('[tjmg:pje] Puppeteer falhou:', err.message);
   }
-
   return null;
 }
 
 async function consultar(numero) {
-  try {
-    const resultadoESAJ = await tentarESAJ(numero);
-    if (resultadoESAJ) return resultadoESAJ;
-  } catch (err) {
-    console.warn('[tjmg:esaj] Erro:', err.message);
-  }
+  const resultadoAxios = await tentarComAxios(numero);
+  if (resultadoAxios) return resultadoAxios;
 
-  const resultadoPJe = await tentarPJePuppeteer(numero);
-  if (resultadoPJe) return resultadoPJe;
+  if (isEnabled()) {
+    const resultadoPuppeteer = await tentarComPuppeteer(numero);
+    if (resultadoPuppeteer) return resultadoPuppeteer;
+  }
 
   return {
     sucesso: false,
-    erro: 'Processo não encontrado no TJMG (eSAJ + PJe)',
+    erro: 'Processo não encontrado no TJMG (eProc 1º e 2º grau)',
     andamentos: [],
     tribunal: 'TJMG',
-    dica: 'O TJMG tem dois sistemas. Ative USE_PUPPETEER=true para tentar o PJe também.'
+    dica: 'Verifique se o processo é eletrônico (eProc). Processos PJe podem não estar disponíveis.'
   };
 }
 

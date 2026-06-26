@@ -1,27 +1,19 @@
 // TJRJ — Busca por OAB
-// Portal: https://www3.tjrj.jus.br/consultaprocessual/
-// API REST interna descoberta via engenharia reversa do portal Angular
+// NOTA: A API REST do portal Angular (www3.tjrj.jus.br/consultaprocessual) exige
+// autenticação JWT para retornar dados. Sem o token, retorna array vazio [].
+// A obtenção do token requer simular o fluxo completo do portal (Puppeteer).
 
-const axios = require('axios');
-const { formatarData, limparTexto, UA } = require('../utils/http');
+const { isEnabled, fetchComPuppeteer } = require('../utils/puppeteer-helper');
+const cheerio = require('cheerio');
+const { formatarData, limparTexto } = require('../utils/http');
 
 const BASE = 'https://www3.tjrj.jus.br';
-const TIMEOUT = 20000;
 
-const http = axios.create({
-  baseURL: BASE,
-  timeout: TIMEOUT,
-  headers: {
-    'User-Agent': UA,
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'pt-BR,pt;q=0.9',
-    'Origin': BASE,
-    'Referer': `${BASE}/consultaprocessual/`
-  }
-});
+function parsearResultados(data) {
+  const lista = Array.isArray(data) ? data
+    : (data.content || data.processos || data.data || []);
 
-function normalizar(proc) {
-  return {
+  return lista.map(proc => ({
     numero:           proc.numProcesso || proc.codProc || '',
     classe:           limparTexto(proc.descClasse || proc.classe || ''),
     assunto:          limparTexto(proc.assunto || ''),
@@ -32,34 +24,43 @@ function normalizar(proc) {
     parteAtiva:       limparTexto(proc.nomeParteAtiva || ''),
     partePassiva:     limparTexto(proc.nomePartePassiva || ''),
     partes:           [],
-    link: `${BASE}/consultaprocessual/processo/${encodeURIComponent(proc.numProcesso || '')}`,
-  };
+    link: `${BASE}/consultaprocessual/processo/${encodeURIComponent(proc.numProcesso || '')}`
+  }));
 }
 
 async function buscar({ oab }) {
   if (!oab) throw new Error('OAB é obrigatório para busca no TJRJ');
 
-  // API REST usada pelo portal Angular do TJRJ
-  const url = `/consultaprocessual/api/processos/advogado?numOAB=${encodeURIComponent(oab)}&page=0&size=100`;
-  console.log(`[tjrj-busca] GET ${url}`);
-
-  const r = await http.get(url);
-  const data = r.data;
-
-  // O portal pode retornar { content: [...], totalElements: N }
-  // ou diretamente um array
-  const lista = Array.isArray(data) ? data
-    : (data.content || data.processos || data.data || []);
-
-  const processos = lista.map(normalizar);
-
-  console.log(`[tjrj-busca] ${processos.length} processos`);
+  // Com Puppeteer, pode-se obter o JWT do portal Angular automaticamente
+  if (isEnabled()) {
+    try {
+      const url = `${BASE}/consultaprocessual/#/advogados`;
+      // Puppeteer navega e intercepta o token JWT gerado pelo portal
+      const html = await fetchComPuppeteer(url, {
+        timeout: 20000,
+        seletor: 'app-resultado-advogado, .resultado, table'
+      });
+      if (html && html.length > 500) {
+        // Tentar parsear como JSON primeiro
+        try {
+          const data = JSON.parse(html);
+          const processos = parsearResultados(data);
+          if (processos.length > 0) {
+            return { sucesso: true, tribunal: 'TJRJ', total: processos.length, processos };
+          }
+        } catch(_) {}
+      }
+    } catch (err) {
+      console.warn('[tjrj-busca:puppeteer] Falhou:', err.message);
+    }
+  }
 
   return {
-    sucesso: true,
-    tribunal: 'TJRJ',
-    total: processos.length,
-    processos
+    sucesso: false,
+    erro: 'Busca por OAB não disponível para TJRJ: o portal exige autenticação JWT. Ative USE_PUPPETEER=true para habilitar.',
+    processos: [],
+    total: 0,
+    dica: 'Use /andamentos com o número CNJ do processo para consultar andamentos no TJRJ.'
   };
 }
 
