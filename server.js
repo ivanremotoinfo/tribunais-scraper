@@ -5,13 +5,49 @@ const rateLimit = require('express-rate-limit');
 const NodeCache = require('node-cache');
 const { consultar } = require('./scrapers');
 const tjbaBusca = require('./scrapers/tjba-busca');
+const tjspBusca = require('./scrapers/tjsp-busca');
+const tjrjBusca = require('./scrapers/tjrj-busca');
+const tjmgBusca = require('./scrapers/tjmg-busca');
+
+const BUSCADORES_OAB = { tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca };
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const CACHE_TTL = parseInt(process.env.CACHE_TTL || '3600', 10);
 const cache = new NodeCache({ stdTTL: CACHE_TTL });
 
-const TRIBUNAIS_SUPORTADOS = ['tjba', 'trt5', 'trf1', 'tjsp', 'tjrj', 'tjmg', 'stj', 'tst'];
+const TRIBUNAIS_SUPORTADOS = [
+  'tjba', 'tjsp', 'tjrj', 'tjmg', 'tjsc', 'tjpr', 'tjrs', 'tjce', 'tjpe',
+  'trt5', 'trf1', 'trf4', 'trf5', 'stj', 'tst'
+];
+
+// NNNNNNN-DD.AAAA.J.TT.OOOO → código do tribunal (se tiver scraper disponível)
+function detectarTribunalPorCNJ(numero) {
+  const m = String(numero).match(/\d{7}-\d{2}\.\d{4}\.(\d)\.(\d{2})\.\d{4}/);
+  if (!m) return null;
+  const j = parseInt(m[1]);
+  const tt = parseInt(m[2]);
+  if (j === 3) return 'stj';
+  if (j === 4) {
+    if (tt === 0) return 'tst';
+    const trts = { 5: 'trt5' };
+    return trts[tt] || null;
+  }
+  if (j === 7) {
+    const trfs = { 1: 'trf1', 4: 'trf4', 5: 'trf5' };
+    return trfs[tt] || null;
+  }
+  if (j === 8) {
+    const tjs = {
+      5: 'tjba', 24: 'tjsp', 18: 'tjrj', 12: 'tjmg',
+      23: 'tjsc', 15: 'tjpr', 20: 'tjrs', 6: 'tjce', 16: 'tjpe',
+      8: 'tjgo', 13: 'tjpa', 9: 'tjma', 19: 'tjrn', 21: 'tjro',
+      25: 'tjse', 26: 'tjto', 14: 'tjpb', 17: 'tjpi'
+    };
+    return tjs[tt] || null;
+  }
+  return null;
+}
 
 // ── JSON ──────────────────────────────────────────────────────────────────────
 app.use(express.json());
@@ -79,20 +115,34 @@ app.get('/andamentos', (_req, res) => {
 app.post('/andamentos', async (req, res) => {
   const { numero, tribunal } = req.body || {};
 
-  if (!numero || !tribunal) {
+  if (!numero) {
     return res.status(400).json({
       sucesso: false,
-      erro: 'Campos "numero" e "tribunal" são obrigatórios.',
+      erro: 'Campo "numero" é obrigatório.',
       andamentos: []
     });
   }
 
-  const tribunalNorm = String(tribunal).toLowerCase().trim();
+  let tribunalNorm = tribunal ? String(tribunal).toLowerCase().trim() : null;
+
+  if (!tribunalNorm) {
+    tribunalNorm = detectarTribunalPorCNJ(numero);
+    if (tribunalNorm) console.log(`[auto-detect] ${numero} → ${tribunalNorm}`);
+  }
+
+  if (!tribunalNorm) {
+    return res.status(400).json({
+      sucesso: false,
+      erro: 'Campo "tribunal" é obrigatório (não foi possível detectar pelo número CNJ).',
+      suportados: TRIBUNAIS_SUPORTADOS,
+      andamentos: []
+    });
+  }
 
   if (!TRIBUNAIS_SUPORTADOS.includes(tribunalNorm)) {
     return res.status(400).json({
       sucesso: false,
-      erro: `Tribunal "${tribunal}" não suportado.`,
+      erro: `Tribunal "${tribunalNorm}" não suportado.`,
       suportados: TRIBUNAIS_SUPORTADOS,
       andamentos: []
     });
@@ -142,7 +192,8 @@ app.get('/buscar-por-oab', (_req, res) => {
   res.json({
     sucesso: false,
     info: 'Use POST com body JSON',
-    exemplo: { oab: '58870', nome: 'JOSE NILSON SILVA', tribunal: 'tjba' }
+    exemplo: { oab: '58870', tribunal: 'tjba' },
+    tribunaisSuportados: Object.keys(BUSCADORES_OAB)
   });
 });
 
@@ -155,9 +206,14 @@ app.post('/buscar-por-oab', async (req, res) => {
   }
 
   const trib = String(tribunal || 'tjba').toLowerCase().trim();
+  const buscador = BUSCADORES_OAB[trib];
 
-  if (trib !== 'tjba') {
-    return res.status(400).json({ sucesso: false, erro: `Tribunal "${trib}" ainda não suportado para busca por OAB. Use "tjba".` });
+  if (!buscador) {
+    return res.status(400).json({
+      sucesso: false,
+      erro: `Tribunal "${trib}" ainda não suportado para busca por OAB.`,
+      suportados: Object.keys(BUSCADORES_OAB)
+    });
   }
 
   const cacheKey = `oab:${trib}:${oab || ''}:${nome || ''}`;
@@ -172,7 +228,7 @@ app.post('/buscar-por-oab', async (req, res) => {
 
   try {
     const resultado = await Promise.race([
-      tjbaBusca.buscar({ oab, nome }),
+      buscador.buscar({ oab, nome }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Timeout de 30s atingido')), 30000)
       )
