@@ -2,25 +2,19 @@ services:
   - type: web
     name: tribunais-scraper
     env: node
-    region: oregon
+    region: ohio
     plan: free
-    buildCommand: apt-get install -y chromium && npm install
+    buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: USE_PUPPETEER
-        value: "true"
+        value: "false"
       - key: CACHE_TTL
         value: "3600"
       - key: REQUEST_TIMEOUT
-        value: "15000"
+        value: "20000"
       - key: CORS_ORIGINS
-        value: "https://SEU_USUARIO.github.io,https://suporte.adv.br"
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: "/usr/bin/chromium"
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: "true"
+        value: "https://ivanremotoinfo.github.io,https://suporteadv.suporte.adv.br"
