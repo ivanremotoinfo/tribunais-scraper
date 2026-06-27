@@ -109,11 +109,16 @@ async function buscar({ oab }) {
 
   const html = r.data;
 
-  if (/Nenhum.*processo/i.test(html) || /0 processo/i.test(html)) {
+  const temNenhum = /Nenhum.*processo/i.test(html) || /0 processo/i.test(html);
+  const temCaptcha = /captcha/i.test(html) && !/infraValidarOAB/i.test(html);
+  const temTabela = /infraTable|class="infraTr/i.test(html);
+  console.log(`[trf2-busca] html=${html.length}chars nenhum=${temNenhum} captcha=${temCaptcha} tabela=${temTabela}`);
+
+  if (temNenhum) {
     return { sucesso: true, tribunal: 'TRF2', total: 0, processos: [] };
   }
 
-  if (/captcha/i.test(html) && !/infraValidarOAB/i.test(html)) {
+  if (temCaptcha) {
     throw new Error('TRF2 exige resolução de CAPTCHA para esta busca');
   }
 
