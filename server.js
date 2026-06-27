@@ -18,10 +18,15 @@ const cache = new NodeCache({ stdTTL: CACHE_TTL });
 
 const TRIBUNAIS_SUPORTADOS = [
   'tjba', 'tjsp', 'tjrj', 'tjmg', 'tjsc', 'tjpr', 'tjrs', 'tjce', 'tjpe',
-  'trt5', 'trf1', 'trf2', 'trf4', 'trf5', 'stj', 'tst'
+  'trt1', 'trt2', 'trt3', 'trt4', 'trt5', 'trt6', 'trt7', 'trt8', 'trt9', 'trt10',
+  'trt11', 'trt12', 'trt13', 'trt14', 'trt15', 'trt16', 'trt17', 'trt18', 'trt19',
+  'trt20', 'trt21', 'trt22', 'trt23', 'trt24',
+  'trf1', 'trf2', 'trf3', 'trf4', 'trf5', 'stj', 'tst'
 ];
 
-// NNNNNNN-DD.AAAA.J.TT.OOOO → código do tribunal (se tiver scraper disponível)
+// NNNNNNN-DD.AAAA.J.TT.OOOO → código do tribunal
+// J=3: Superior (STJ)  J=4: Federal (TRFs)  J=5: Trabalhista (TST/TRTs)
+// J=6: Eleitoral       J=7: Militar União    J=8: Estadual (TJs)
 function detectarTribunalPorCNJ(numero) {
   const m = String(numero).match(/\d{7}-\d{2}\.\d{4}\.(\d)\.(\d{2})\.\d{4}/);
   if (!m) return null;
@@ -29,13 +34,14 @@ function detectarTribunalPorCNJ(numero) {
   const tt = parseInt(m[2]);
   if (j === 3) return 'stj';
   if (j === 4) {
-    if (tt === 0) return 'tst';
-    const trts = { 5: 'trt5' };
-    return trts[tt] || null;
-  }
-  if (j === 7) {
-    const trfs = { 1: 'trf1', 2: 'trf2', 4: 'trf4', 5: 'trf5' };
+    // Justiça Federal: TRF1–TRF5
+    const trfs = { 1: 'trf1', 2: 'trf2', 3: 'trf3', 4: 'trf4', 5: 'trf5' };
     return trfs[tt] || null;
+  }
+  if (j === 5) {
+    // Justiça do Trabalho: TST (TT=0) ou TRT1–TRT24
+    if (tt === 0) return 'tst';
+    return `trt${tt}`;
   }
   if (j === 8) {
     const tjs = {
