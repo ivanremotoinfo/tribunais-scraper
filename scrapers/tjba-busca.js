@@ -79,7 +79,9 @@ async function getJSON(url) {
 }
 
 async function buscarPorOAB(oab) {
-  const url = `${API_BASE}/numOab/${encodeURIComponent(oab)}`;
+  // API exige formato {numero}BA (ex: "58870BA")
+  const oabFormatado = String(oab).replace(/\D/g, '') + 'BA';
+  const url = `${API_BASE}/numOab/${encodeURIComponent(oabFormatado)}`;
   console.log(`[tjba-busca] GET ${url}`);
   return getJSON(url);
 }
