@@ -80,10 +80,12 @@ function totalPaginas(html) {
 
 async function buscarPagina(page, oabNum, pagina) {
   if (pagina === 1) {
-    await page.goto(`${BASE}/open.do`, { waitUntil: 'load', timeout: TIMEOUT });
+    // domcontentloaded: só espera o HTML parsear, não todos os recursos JS/CSS
+    // waitForSelector cuida de esperar o React renderizar o formulário
+    await page.goto(`${BASE}/open.do`, { waitUntil: 'domcontentloaded', timeout: TIMEOUT });
 
     // Selecionar tipo OAB
-    await page.waitForSelector('select[name="cbPesquisa"]', { timeout: 10000 });
+    await page.waitForSelector('select[name="cbPesquisa"]', { timeout: TIMEOUT });
     await page.select('select[name="cbPesquisa"]', 'NUMOAB');
 
     // Aguardar React re-render e campo de valor aparecer
