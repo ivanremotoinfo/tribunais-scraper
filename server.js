@@ -9,8 +9,9 @@ const tjspBusca = require('./scrapers/tjsp-busca');
 const tjrjBusca = require('./scrapers/tjrj-busca');
 const tjmgBusca = require('./scrapers/tjmg-busca');
 const tjmsBusca = require('./scrapers/tjms-busca');
+const tjceBusca = require('./scrapers/tjce-busca');
 
-const BUSCADORES_OAB = { tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca, tjms: tjmsBusca };
+const BUSCADORES_OAB = { tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca, tjms: tjmsBusca, tjce: tjceBusca };
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -19,6 +20,7 @@ const cache = new NodeCache({ stdTTL: CACHE_TTL });
 
 const TRIBUNAIS_SUPORTADOS = [
   'tjba', 'tjsp', 'tjrj', 'tjmg', 'tjsc', 'tjpr', 'tjrs', 'tjce', 'tjpe',
+  'tjgo', 'tjma', 'tjpa', 'tjpb', 'tjpi', 'tjrn', 'tjro', 'tjse', 'tjto', 'tjms',
   'trt1', 'trt2', 'trt3', 'trt4', 'trt5', 'trt6', 'trt7', 'trt8', 'trt9', 'trt10',
   'trt11', 'trt12', 'trt13', 'trt14', 'trt15', 'trt16', 'trt17', 'trt18', 'trt19',
   'trt20', 'trt21', 'trt22', 'trt23', 'trt24',
@@ -46,10 +48,10 @@ function detectarTribunalPorCNJ(numero) {
   }
   if (j === 8) {
     const tjs = {
-      5: 'tjba', 24: 'tjsp', 18: 'tjrj', 12: 'tjmg',
-      23: 'tjsc', 15: 'tjpr', 20: 'tjrs', 6: 'tjce', 16: 'tjpe',
-      8: 'tjgo', 13: 'tjpa', 9: 'tjma', 19: 'tjrn', 21: 'tjro',
-      25: 'tjse', 26: 'tjto', 14: 'tjpb', 17: 'tjpi'
+      5: 'tjba',  6: 'tjce',  9: 'tjgo', 10: 'tjma', 13: 'tjmg',
+      14: 'tjpa', 15: 'tjpb', 16: 'tjpr', 17: 'tjpe', 18: 'tjpi',
+      19: 'tjrj', 20: 'tjrn', 21: 'tjrs', 22: 'tjro',
+      24: 'tjsc', 25: 'tjse', 26: 'tjsp', 27: 'tjto',
     };
     return tjs[tt] || null;
   }

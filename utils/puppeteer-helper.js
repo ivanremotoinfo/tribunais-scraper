@@ -1,4 +1,5 @@
 // Puppeteer é opcional — só carregado quando USE_PUPPETEER=true
+// puppeteer-extra-plugin-stealth contorna detecção de headless pelo reCAPTCHA v3
 let puppeteer = null;
 let browser = null;
 
@@ -9,29 +10,45 @@ function isEnabled() {
 async function getBrowser() {
   if (!isEnabled()) throw new Error('Puppeteer desabilitado. Defina USE_PUPPETEER=true para ativar.');
   if (!puppeteer) {
-    puppeteer = require('puppeteer-core');
+    const { addExtra } = require('puppeteer-extra');
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+    const puppeteerCore = require('puppeteer-core');
+    puppeteer = addExtra(puppeteerCore);
+    puppeteer.use(StealthPlugin());
   }
   if (!browser || !browser.isConnected()) {
     console.log('[puppeteer] Iniciando browser...');
     let executablePath;
-    const args = [
-      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote',
-      '--disable-gpu', '--window-size=1280,800'
-    ];
+    let args;
 
     if (process.env.PUPPETEER_EXECUTABLE_PATH) {
       executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      // Chrome local (Windows/Mac): não precisa de --no-sandbox
+      // --disable-blink-features=AutomationControlled remove navigator.webdriver=true
+      args = [
+        '--disable-blink-features=AutomationControlled',
+        '--disable-dev-shm-usage',
+        '--no-first-run',
+        '--disable-gpu',
+        '--window-size=1280,800',
+      ];
       console.log(`[puppeteer] Usando Chrome: ${executablePath}`);
     } else {
-      // @sparticuz/chromium — extrai binário em /tmp, funciona sem apt
+      // @sparticuz/chromium (Linux/serverless) — precisa de --no-sandbox
       const chromium = require('@sparticuz/chromium');
       executablePath = await chromium.executablePath();
-      args.push(...chromium.args);
+      args = [
+        ...chromium.args,
+        '--disable-blink-features=AutomationControlled',
+        '--window-size=1280,800',
+      ];
       console.log(`[puppeteer] Chrome via @sparticuz/chromium: ${executablePath}`);
     }
 
-    browser = await puppeteer.launch({ headless: true, args, executablePath });
+    // headless: false para Chrome local — reCAPTCHA v3 dá score alto em modo visível
+    // Para serverless (@sparticuz/chromium), usa headless: true (sem display)
+    const headlessMode = process.env.PUPPETEER_EXECUTABLE_PATH ? false : true;
+    browser = await puppeteer.launch({ headless: headlessMode, args, executablePath });
     browser.on('disconnected', () => { browser = null; });
     console.log('[puppeteer] Browser iniciado.');
   }
