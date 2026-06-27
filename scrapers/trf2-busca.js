@@ -80,7 +80,16 @@ async function buscar({ oab }) {
 
   console.log(`[trf2-busca] Buscando OAB=${oabNum} no TRF2`);
 
-  const { oabField, cookieStr } = await obterSessao();
+  let sessao;
+  try {
+    sessao = await obterSessao();
+  } catch (e) {
+    if (e.response?.status === 429) {
+      throw new Error('TRF2 temporariamente indisponível (limite de requisições). Tente novamente em alguns minutos.');
+    }
+    throw e;
+  }
+  const { oabField, cookieStr } = sessao;
 
   if (!oabField) {
     throw new Error('TRF2: não foi possível extrair o campo OAB da página');
@@ -94,17 +103,25 @@ async function buscar({ oab }) {
   params.append('sbmNovo', 'Pesquisar');
   params.append(oabField, oabNum);
 
-  const r = await axios.post(URL_BUSCA, params.toString(), {
-    timeout: TIMEOUT,
-    headers: {
-      ...HEADERS,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Cookie': cookieStr,
-      'Referer': URL_BUSCA,
-      'Origin': BASE,
-    },
-    maxRedirects: 5,
-  });
+  let r;
+  try {
+    r = await axios.post(URL_BUSCA, params.toString(), {
+      timeout: TIMEOUT,
+      headers: {
+        ...HEADERS,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': cookieStr,
+        'Referer': URL_BUSCA,
+        'Origin': BASE,
+      },
+      maxRedirects: 5,
+    });
+  } catch (e) {
+    if (e.response?.status === 429) {
+      throw new Error('TRF2 temporariamente indisponível (limite de requisições). Tente novamente em alguns minutos.');
+    }
+    throw e;
+  }
 
   const html = r.data;
 
