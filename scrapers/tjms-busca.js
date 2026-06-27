@@ -7,7 +7,7 @@ const cheerio = require('cheerio');
 const { getBrowser, isEnabled } = require('../utils/puppeteer-helper');
 
 const BASE    = 'https://esaj.tjms.jus.br/cpopg5';
-const TIMEOUT = 30000;
+const TIMEOUT = 60000;
 const UA      = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
 
 function limpar(str) {
@@ -80,7 +80,7 @@ function totalPaginas(html) {
 
 async function buscarPagina(page, oabNum, pagina) {
   if (pagina === 1) {
-    await page.goto(`${BASE}/open.do`, { waitUntil: 'networkidle2', timeout: TIMEOUT });
+    await page.goto(`${BASE}/open.do`, { waitUntil: 'load', timeout: TIMEOUT });
 
     // Selecionar tipo OAB
     await page.waitForSelector('select[name="cbPesquisa"]', { timeout: 10000 });
