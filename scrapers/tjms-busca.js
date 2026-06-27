@@ -96,9 +96,10 @@ async function buscarPagina(page, oabNum, pagina) {
     await page.type('#campo_NUMOAB', oabNum, { delay: 30 });
 
     // TJMS usa <input type="submit" value="Consultar">, não <button>
-    // networkidle0: espera AJAX dos resultados completar (o site carrega resultados via JS)
+    // domcontentloaded: mais rápido no Render free tier; resultados AJAX são aguardados
+    // pelo waitForFunction abaixo (não precisamos de networkidle0 aqui)
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle0', timeout: TIMEOUT }),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: TIMEOUT }),
       page.click('input[type="submit"][value="Consultar"]'),
     ]);
 
