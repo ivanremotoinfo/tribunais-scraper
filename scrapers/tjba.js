@@ -1,34 +1,97 @@
-// TJBA — eProc (sistema e-Proc TRF/TJ)
-// Portais:  1ª grau → https://eproc.tjba.jus.br
-//           2ª grau → https://eproc2.tjba.jus.br
-// Estratégia: Axios + Cheerio (eProc é SSR — HTML completo na primeira requisição)
-// Se USE_PUPPETEER=true e Axios falhar, tenta Puppeteer como fallback
+// TJBA — Tribunal de Justiça da Bahia
+// Estratégia:
+//   1. DataJud (CNJ) — API pública, cobre todos os processos TJBA registrados no CNJ
+//   2. eProc TJBA   — fallback para processos eletrônicos antigos em portais legados
+//
+// PJe TJBA (portal principal) exige CAPTCHA na consulta pública.
+// eSAJ TJBA (legado) exige autenticação CAS.
+// Ambos inviabilizados para scraping direto → DataJud é a via confiável.
 
+const axios = require('axios');
 const cheerio = require('cheerio');
 const { criarCliente, formatarData, limparTexto, apenasDigitos } = require('../utils/http');
 const { isEnabled, fetchComPuppeteer } = require('../utils/puppeteer-helper');
 
-const PORTAIS = [
+// DataJud — chave pública CNJ (mesma do Cloudflare Worker)
+const DATAJUD_BASE  = 'https://api-publica.datajud.cnj.jus.br';
+const DATAJUD_KEY   = process.env.DATAJUD_KEY || 'cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==';
+const DATAJUD_INDEX = 'api_publica_tjba';
+
+// eProc TJBA — portais de 1º e 2º grau
+const PORTAIS_EPROC = [
   'https://eproc1g.tjba.jus.br',
   'https://eproc2g.tjba.jus.br'
 ];
 
-function urlConsulta(base, numero) {
-  // eProc aceita o número sem formatação (apenas dígitos) no parâmetro num_processo
+// ────────────────────────────────────────────────────────────────────────────
+// DataJud
+// ────────────────────────────────────────────────────────────────────────────
+
+function formatarDataISO(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  const dia = String(d.getUTCDate()).padStart(2, '0');
+  const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
+  return `${dia}/${mes}/${d.getUTCFullYear()}`;
+}
+
+function parsearMovimentosDataJud(movimentos) {
+  if (!Array.isArray(movimentos)) return [];
+  return movimentos
+    .filter(m => m.dataHora && m.nome)
+    .map(m => {
+      let descricao = m.nome;
+      const comps = (m.complementosTabelados || []).map(c => c.nome).filter(Boolean);
+      if (comps.length) descricao += ` — ${comps.join(', ')}`;
+      return { data: formatarDataISO(m.dataHora), descricao };
+    })
+    .filter(a => a.data);
+}
+
+async function consultarDataJud(numero) {
+  const numDigitos = apenasDigitos(numero);
+  if (!numDigitos || numDigitos.length < 15) return null;
+
+  try {
+    console.log(`[tjba:datajud] POST ${DATAJUD_BASE}/${DATAJUD_INDEX}/_search (${numDigitos})`);
+    const resp = await axios.post(
+      `${DATAJUD_BASE}/${DATAJUD_INDEX}/_search`,
+      { query: { match: { numeroProcesso: numDigitos } }, size: 1, _source: ['numeroProcesso', 'movimentos'] },
+      { headers: { Authorization: `ApiKey ${DATAJUD_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+    );
+
+    const hits = resp.data?.hits?.hits || [];
+    if (!hits.length) {
+      console.log(`[tjba:datajud] Nenhum resultado para ${numDigitos}`);
+      return null;
+    }
+
+    const andamentos = parsearMovimentosDataJud(hits[0]._source?.movimentos || []);
+    if (!andamentos.length) {
+      console.log(`[tjba:datajud] Processo encontrado mas sem movimentos`);
+      return null;
+    }
+
+    console.log(`[tjba:datajud] ${andamentos.length} movimentos encontrados`);
+    return { sucesso: true, andamentos, tribunal: 'TJBA', portal: 'datajud' };
+  } catch (err) {
+    console.warn(`[tjba:datajud] Erro:`, err.message);
+    return null;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// eProc TJBA (fallback)
+// ────────────────────────────────────────────────────────────────────────────
+
+function urlEProc(base, numero) {
   return `${base}/eproc/externo_controlador.php?acao=processo_seleciona_publica&chave=&num_processo=${apenasDigitos(numero)}`;
 }
 
-function parsearHtml(html, fonte) {
+function parsearHtmlEProc(html) {
   const $ = cheerio.load(html);
   const andamentos = [];
-
-  // eProc usa tabela com id "tblMovimentos" ou linhas com classe infraTrClara/infraTrEscura
-  // A estrutura típica é:
-  //   <table id="tblMovimentos">
-  //     <tr class="infraTrClara"> <td>data</td> <td>descricao</td> </tr>
-  //   </table>
-  //
-  // Fallback: procura qualquer tabela com "Movimentos" no cabeçalho
 
   const tentarTabela = (linhas) => {
     linhas.each((_i, tr) => {
@@ -41,17 +104,14 @@ function parsearHtml(html, fonte) {
     });
   };
 
-  // Seletor primário — id da tabela de movimentos
   let linhas = $('table#tblMovimentos tr, table#fldMovimentos tr');
   if (linhas.length) { tentarTabela(linhas); }
 
-  // Fallback — linhas com classe eProc padrão
   if (!andamentos.length) {
     linhas = $('tr.infraTrClara, tr.infraTrEscura');
     tentarTabela(linhas);
   }
 
-  // Fallback genérico — qualquer tabela que contenha colunas com data no formato DD/MM/AAAA
   if (!andamentos.length) {
     $('table tr').each((_i, tr) => {
       const tds = $(tr).find('td');
@@ -65,7 +125,7 @@ function parsearHtml(html, fonte) {
   return andamentos;
 }
 
-function detectarErro(html) {
+function detectarErroEProc(html) {
   const lower = html.toLowerCase();
   return (
     lower.includes('processo não encontrado') ||
@@ -76,70 +136,59 @@ function detectarErro(html) {
   );
 }
 
-async function tentarComAxios(numero) {
-  for (const base of PORTAIS) {
+async function consultarEProc(numero) {
+  for (const base of PORTAIS_EPROC) {
     try {
       const http = criarCliente(base);
-      const url = urlConsulta(base, numero);
-      console.log(`[tjba] GET ${url}`);
+      const url = urlEProc(base, numero);
+      console.log(`[tjba:eproc] GET ${url}`);
       const { data: html } = await http.get(url);
 
-      if (detectarErro(html)) {
-        console.log(`[tjba] Processo não encontrado em ${base}`);
+      if (detectarErroEProc(html)) {
+        console.log(`[tjba:eproc] Processo não encontrado em ${base}`);
         continue;
       }
 
-      const andamentos = parsearHtml(html, base);
+      const andamentos = parsearHtmlEProc(html);
       if (andamentos.length > 0) {
-        return { sucesso: true, andamentos, tribunal: 'TJBA', portal: base };
+        return { sucesso: true, andamentos, tribunal: 'TJBA', portal: `eproc-${base}` };
       }
 
-      // HTML recebido mas sem movimentos parseados — pode ser JS-heavy ou estrutura diferente
-      console.log(`[tjba] HTML recebido de ${base} mas sem movimentos (${html.length} chars)`);
+      if (isEnabled()) {
+        const htmlP = await fetchComPuppeteer(url, { seletor: '#tblMovimentos, .infraTrClara', timeout: 15000 });
+        if (!detectarErroEProc(htmlP)) {
+          const andamentosP = parsearHtmlEProc(htmlP);
+          if (andamentosP.length > 0) {
+            return { sucesso: true, andamentos: andamentosP, tribunal: 'TJBA', portal: `eproc-${base}-puppeteer` };
+          }
+        }
+      }
     } catch (err) {
-      console.warn(`[tjba] Axios falhou em ${base}:`, err.message);
+      console.warn(`[tjba:eproc] Erro em ${base}:`, err.message);
     }
   }
   return null;
 }
 
-async function tentarComPuppeteer(numero) {
-  for (const base of PORTAIS) {
-    try {
-      const url = urlConsulta(base, numero);
-      console.log(`[tjba:puppeteer] GET ${url}`);
-      const html = await fetchComPuppeteer(url, { seletor: '#tblMovimentos, .infraTrClara', timeout: 15000 });
-
-      if (detectarErro(html)) continue;
-
-      const andamentos = parsearHtml(html, base);
-      if (andamentos.length > 0) {
-        return { sucesso: true, andamentos, tribunal: 'TJBA', portal: base + ' (puppeteer)' };
-      }
-    } catch (err) {
-      console.warn(`[tjba:puppeteer] Falhou em ${base}:`, err.message);
-    }
-  }
-  return null;
-}
+// ────────────────────────────────────────────────────────────────────────────
+// Consulta principal
+// ────────────────────────────────────────────────────────────────────────────
 
 async function consultar(numero) {
-  // Tentativa 1: Axios + Cheerio (rápido, sem dependência de Chrome)
-  const resultadoAxios = await tentarComAxios(numero);
-  if (resultadoAxios) return resultadoAxios;
+  // 1. DataJud — cobre a maioria dos processos TJBA (PJe + legados registrados no CNJ)
+  const resultadoDataJud = await consultarDataJud(numero);
+  if (resultadoDataJud) return resultadoDataJud;
 
-  // Tentativa 2: Puppeteer (só se habilitado via USE_PUPPETEER=true)
-  if (isEnabled()) {
-    const resultadoPuppeteer = await tentarComPuppeteer(numero);
-    if (resultadoPuppeteer) return resultadoPuppeteer;
-  }
+  // 2. eProc TJBA — fallback para portais legados
+  const resultadoEProc = await consultarEProc(numero);
+  if (resultadoEProc) return resultadoEProc;
 
   return {
     sucesso: false,
-    erro: 'Processo não encontrado nos portais do TJBA (eProc 1º e 2º grau)',
+    erro: 'Processo não encontrado no TJBA (DataJud CNJ e eProc)',
     andamentos: [],
     tribunal: 'TJBA',
-    dica: 'Verifique o número e se o processo é eletrônico (e-Proc). Processos físicos não aparecem aqui.'
+    dica: 'Verifique o número CNJ. Processos físicos ou segredo de justiça não aparecem na consulta pública.'
   };
 }
 
