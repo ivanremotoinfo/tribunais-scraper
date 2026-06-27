@@ -18,7 +18,7 @@ const cache = new NodeCache({ stdTTL: CACHE_TTL });
 
 const TRIBUNAIS_SUPORTADOS = [
   'tjba', 'tjsp', 'tjrj', 'tjmg', 'tjsc', 'tjpr', 'tjrs', 'tjce', 'tjpe',
-  'trt5', 'trf1', 'trf4', 'trf5', 'stj', 'tst'
+  'trt5', 'trf1', 'trf2', 'trf4', 'trf5', 'stj', 'tst'
 ];
 
 // NNNNNNN-DD.AAAA.J.TT.OOOO → código do tribunal (se tiver scraper disponível)
@@ -34,7 +34,7 @@ function detectarTribunalPorCNJ(numero) {
     return trts[tt] || null;
   }
   if (j === 7) {
-    const trfs = { 1: 'trf1', 4: 'trf4', 5: 'trf5' };
+    const trfs = { 1: 'trf1', 2: 'trf2', 4: 'trf4', 5: 'trf5' };
     return trfs[tt] || null;
   }
   if (j === 8) {
