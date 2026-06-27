@@ -173,6 +173,16 @@ async function buscar({ oab }) {
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'pt-BR,pt;q=0.9' });
     await page.setViewport({ width: 1280, height: 800 });
 
+    // Bloquear recursos visuais para acelerar no Render (Chromium serverless é lento)
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (['image', 'font', 'stylesheet', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
+
     console.log(`[tjms-busca] Buscando OAB=${oabNum}...`);
 
     const html1 = await buscarPagina(page, oabNum, 1);
