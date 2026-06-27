@@ -52,12 +52,11 @@ function parsearResultados(html) {
   const $ = cheerio.load(html);
   const processos = [];
 
-  // eProc lista processos em tabela com class infraTable
-  $('table.infraTable tbody tr, table tr').each((_i, tr) => {
+  // eProc: tabela com class infraTable (padrão legacy) ou infraTr
+  $('table.infraTable tr, tr.infraTrClaro, tr.infraTrEscuro').each((_i, tr) => {
     const tds = $(tr).find('td');
     if (tds.length < 2) return;
 
-    // Primeiro td: número do processo (link)
     const link = $(tds[0]).find('a').first();
     const numero = limpar(link.text() || $(tds[0]).text());
     if (!numero.match(/\d{7}/) && !numero.match(/\d{4}\.\d{2}/)) return;
@@ -109,16 +108,11 @@ async function buscar({ oab }) {
 
   const html = r.data;
 
-  const temNenhum = /Nenhum.*processo/i.test(html) || /0 processo/i.test(html);
-  const temCaptcha = /captcha/i.test(html) && !/infraValidarOAB/i.test(html);
-  const temTabela = /infraTable|class="infraTr/i.test(html);
-  console.log(`[trf2-busca] html=${html.length}chars nenhum=${temNenhum} captcha=${temCaptcha} tabela=${temTabela}`);
-
-  if (temNenhum) {
+  if (/Nenhum registro encontrado/i.test(html) || /Nenhum.*processo/i.test(html) || /0 processo/i.test(html)) {
     return { sucesso: true, tribunal: 'TRF2', total: 0, processos: [] };
   }
 
-  if (temCaptcha) {
+  if (/captcha/i.test(html) && !/infraValidarOAB/i.test(html)) {
     throw new Error('TRF2 exige resolução de CAPTCHA para esta busca');
   }
 
