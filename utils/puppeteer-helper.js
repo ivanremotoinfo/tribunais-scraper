@@ -13,7 +13,7 @@ async function getBrowser() {
   }
   if (!browser || !browser.isConnected()) {
     console.log('[puppeteer] Iniciando browser...');
-    browser = await puppeteer.launch({
+    const launchOpts = {
       headless: true,
       args: [
         '--no-sandbox',
@@ -25,7 +25,12 @@ async function getBrowser() {
         '--disable-gpu',
         '--window-size=1280,800'
       ]
-    });
+    };
+    if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+      launchOpts.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+      console.log(`[puppeteer] Usando Chrome: ${launchOpts.executablePath}`);
+    }
+    browser = await puppeteer.launch(launchOpts);
     browser.on('disconnected', () => { browser = null; });
     console.log('[puppeteer] Browser iniciado.');
   }
