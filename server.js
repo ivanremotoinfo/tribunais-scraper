@@ -19,12 +19,14 @@ const tjpiBusca = require('./scrapers/tjpi-busca');
 const tjrnBusca = require('./scrapers/tjrn-busca');
 const tjseBusca = require('./scrapers/tjse-busca');
 const tjpbBusca = require('./scrapers/tjpb-busca');
+const trf2Busca = require('./scrapers/trf2-busca');
 
 const BUSCADORES_OAB = {
   tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca,
   tjms: tjmsBusca, tjce: tjceBusca, tjgo: tjgoBusca,
   tjal: tjalBusca, tjam: tjamBusca, tjac: tjacBusca,
   tjma: tjmaBusca, tjpi: tjpiBusca, tjrn: tjrnBusca, tjse: tjseBusca, tjpb: tjpbBusca,
+  trf2: trf2Busca,
 };
 
 const app = express();
