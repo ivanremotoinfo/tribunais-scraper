@@ -10,8 +10,9 @@ const tjrjBusca = require('./scrapers/tjrj-busca');
 const tjmgBusca = require('./scrapers/tjmg-busca');
 const tjmsBusca = require('./scrapers/tjms-busca');
 const tjceBusca = require('./scrapers/tjce-busca');
+const tjgoBusca = require('./scrapers/tjgo-busca');
 
-const BUSCADORES_OAB = { tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca, tjms: tjmsBusca, tjce: tjceBusca };
+const BUSCADORES_OAB = { tjba: tjbaBusca, tjsp: tjspBusca, tjrj: tjrjBusca, tjmg: tjmgBusca, tjms: tjmsBusca, tjce: tjceBusca, tjgo: tjgoBusca };
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
