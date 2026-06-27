@@ -17,6 +17,12 @@ function semResultado(html) {
   return /não existem informações disponíveis para os parâmetros/i.test(html);
 }
 
+function extrairProcessoUnico(html) {
+  const m = html.match(/processo\.numero=([0-9]{7}-[0-9]{2}\.[0-9]{4}\.[0-9]\.[0-9]{2}\.[0-9]{4})/);
+  if (!m) return null;
+  return [{ numero: m[1], classe: '', assunto: '', vara: '', dataDistribuicao: '' }];
+}
+
 function parsearPagina(html) {
   const $ = cheerio.load(html);
   const processos = [];
@@ -73,6 +79,11 @@ async function buscar({ oab }) {
 
   if (semResultado(html1)) {
     return { sucesso: true, tribunal: 'TJAC', total: 0, processos: [] };
+  }
+
+  const unico = extrairProcessoUnico(html1);
+  if (unico) {
+    return { sucesso: true, tribunal: 'TJAC', total: 1, processos: unico };
   }
 
   let processos = parsearPagina(html1);
