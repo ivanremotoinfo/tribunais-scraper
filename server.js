@@ -76,8 +76,12 @@ const origensPermitidas = [
 
 app.use(cors({
   origin(origin, cb) {
-    // Sem origem (ex: curl, Postman) ou origem na lista → permite
-    if (!origin || origensPermitidas.some(o => origin.startsWith(o))) {
+    // Sem origem (ex: curl, Postman) ou origin="null" (file://) → permite
+    if (!origin || origin === 'null') return cb(null, true);
+    // Qualquer localhost/127.0.0.1 (qualquer porta) → permite
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return cb(null, true);
+    // Origens extras configuradas
+    if (origensPermitidas.some(o => origin.startsWith(o))) {
       return cb(null, true);
     }
     // GitHub Pages: permite qualquer *.github.io
