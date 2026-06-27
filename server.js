@@ -237,7 +237,7 @@ app.post('/buscar-por-oab', async (req, res) => {
     const resultado = await Promise.race([
       buscador.buscar({ oab, nome }),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout de 30s atingido')), 30000)
+        setTimeout(() => reject(new Error('Timeout de 90s atingido')), 90000)
       )
     ]);
 
